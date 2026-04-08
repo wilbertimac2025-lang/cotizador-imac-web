@@ -6,28 +6,25 @@ from fpdf import FPDF
 import datetime
 import json
 import os
-import time
 
 # --- CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(page_title="Cotizador Corporativo IMAC", page_icon="🍊", layout="centered")
 
-# --- CLASE PARA EL PDF PROFESIONAL (CON DISEÑO AFINADO) ---
+# --- CLASE PARA EL PDF PROFESIONAL ---
 class PDF(FPDF):
     def footer(self):
-        # Pie de página (se mantiene igual, funciona bien)
         self.set_y(-15)
         self.set_font('Arial', 'I', 8)
         self.set_text_color(150, 150, 150)
         self.cell(0, 10, f'Grupo IMAC | Veracruz, Ver. | Pagina {self.page_no()}', 0, 0, 'C')
 
     def chapter_title(self, num, label):
-        # Función para secciones con color naranja
         self.set_font('Arial', 'B', 12)
         self.set_text_color(255, 102, 0)
         self.cell(0, 10, f"{num}. {label}", ln=True, fill=False)
         self.ln(2)
 
-# --- CONEXIÓN SEGRETA A GOOGLE SHEETS ---
+# --- CONEXIÓN A GOOGLE SHEETS ---
 @st.cache_resource
 def conectar_sheets():
     try:
@@ -35,11 +32,10 @@ def conectar_sheets():
         scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
         creds = Credentials.from_service_account_info(credenciales_dic, scopes=scopes)
         cliente = gspread.authorize(creds)
-        # TU ID REAL DE GOOGLE SHEETS (ya incluido)
+        # ⚠️ AQUÍ DEBE IR TU ID REAL DE GOOGLE SHEETS (EJEMPLO: "1AbC...XYZ")
         sheet = cliente.open_by_key("1-ns2kgub6g4Mg0gQOr-X1ngodUFMWyrbhf9TEUv1T6c").sheet1
         return sheet
     except Exception as e:
-        # Mensaje de error personalizado que configuramos
         st.error("Error conectando a la base de datos. Verifica los secretos.")
         return None
 
@@ -59,11 +55,19 @@ catalogo_rollos = {
     "MASTER LASSER 4.5mm BLANCO F.P. GRAV.": {"clave": "IP050719", "precio": 1375.00}
 }
 
-# --- TÍTULO ---
+# --- ESTILO DE BOTONES ---
+st.markdown("""
+    <style>
+    div.stButton > button:first-child {
+        background-color: #FF6600; color: white; height: 3em; width: 100%; border-radius: 10px; font-size: 20px; font-weight: bold;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+# --- INTERFAZ WEB ---
 st.title("🍊 Cotizador Grupo IMAC")
 st.subheader("Sistema Móvil - Plataforma Web")
 
-# --- FORMULARIO (Se mantiene igual, funciona bien) ---
 with st.form("cotizador_form"):
     st.write("### Datos del Cliente")
     vendedor = st.text_input("Tu Nombre (Asesor)")
@@ -88,14 +92,13 @@ with st.form("cotizador_form"):
 
     submit = st.form_submit_button("GENERAR COTIZACIÓN")
 
-# --- LÓGICA DE CÁLCULO Y GENERACIÓN ---
+# --- LÓGICA DE GENERACIÓN ---
 if submit:
-    # Verificaciones básicas
     if cantidad <= 0 or not cliente or not vendedor:
         st.warning("⚠️ Por favor llena los datos del vendedor, cliente y una cantidad válida.")
     else:
         with st.spinner("Generando PDF profesional y guardando en la nube..."):
-            # Matemáticas
+            # Cálculos
             if modo == "Por m²":
                 m2 = cantidad
                 rollos = math.ceil((m2 * 1.16) / 10)
@@ -120,7 +123,7 @@ if submit:
             iva = subtotal * 0.16
             gran_total = subtotal + iva
 
-            # 1. Registro en Google Sheets
+            # 1. Guardar en Google Sheets
             hoja = conectar_sheets()
             if hoja:
                 fecha_hoy = datetime.datetime.now().strftime("%d/%m/%Y %H:%M")
@@ -128,11 +131,11 @@ if submit:
                 hoja.append_row(fila)
                 st.success(f"✅ ¡Venta registrada exitosamente! Total: ${gran_total:,.2f} MXN")
 
-                # 2. Generación del PDF con formato PROFESIONAL Y CUADRADO
+                # 2. Generar PDF
                 pdf = PDF()
                 pdf.add_page()
                 
-                # --- LOGO PRINCIPAL (Aumentado de 40 a 60mm) ---
+                # Logo grande
                 try:
                     if os.path.exists("logo.jpg"):
                         pdf.image("logo.jpg", x=10, y=8, w=60)
@@ -141,7 +144,7 @@ if submit:
                 except:
                     pass
 
-                # Encabezado Comercial
+                # Encabezado
                 pdf.set_font("Arial", 'B', 16)
                 pdf.set_text_color(255, 102, 0)
                 pdf.cell(0, 8, txt="GRUPO IMAC", ln=True, align='R')
@@ -152,14 +155,14 @@ if submit:
                 pdf.cell(0, 5, txt="masterventas@grupo-imac.com", ln=True, align='R')
                 pdf.ln(10)
 
-                # Título con Fondo Naranja
+                # Título Naranja
                 pdf.set_fill_color(255, 102, 0)
                 pdf.set_text_color(255, 255, 255)
                 pdf.set_font("Arial", 'B', 14)
                 pdf.cell(0, 10, txt="  COTIZACION FORMAL", ln=True, fill=True)
                 pdf.ln(5)
 
-                # Datos Cliente y Fecha
+                # Datos del Cliente
                 pdf.set_text_color(0, 0, 0)
                 fecha_pdf = datetime.datetime.now().strftime("%d/%m/%Y")
                 pdf.set_font("Arial", 'B', 11)
@@ -172,7 +175,7 @@ if submit:
                 pdf.cell(90, 6, txt=etiqueta_area, ln=True, align='R')
                 pdf.ln(5)
 
-                # SECCIÓN 1: ROLLOS
+                # SECCIÓN 1
                 pdf.chapter_title(1, "SISTEMA IMPERMEABILIZANTE")
                 pdf.set_text_color(50, 50, 50)
                 pdf.set_font("Arial", size=11)
@@ -181,56 +184,46 @@ if submit:
                 texto_cantidad_rollos = f"Cantidad: {rollos} rollos (Incluye mermas)" if modo == "Por m²" else f"Cantidad: {rollos} rollos (Piezas directas)"
                 pdf.cell(0, 6, txt=texto_cantidad_rollos, ln=True)
                 
-                # --- SOLUCIÓN AL DESCUADRE: USAR FUENTE COURIER (TABLA INVISIBLE) ---
-                # Esta parte ahora sale alineada perfecto hacia la derecha.
-                pdf.set_font("Courier", size=11) # Cambiamos a Courier temporalmente
+                pdf.set_font("Courier", size=11)
                 txt_precio_u = f"Precio unitario (C/Flete): ${precio_con_flete:,.2f} MXN"
-                # Usamos una celda de ancho 0 (todo el ancho) alineada a la derecha
                 pdf.cell(0, 6, txt=txt_precio_u.rjust(60), ln=True, align='R')
                 
-                pdf.set_font("Arial", 'B', 11) # Regresamos a Arial para el importe
-                txt_importe_r = f"Importe Sección Rollos: ${total_rollos:,.2f} MXN"
+                pdf.set_font("Arial", 'B', 11)
+                txt_importe_r = f"Importe Seccion Rollos: ${total_rollos:,.2f} MXN"
                 pdf.cell(0, 6, txt=txt_importe_r.rjust(60), ln=True, align='R')
                 pdf.ln(5)
 
-                # SECCIÓN 2: PRIMARIO
+                # SECCIÓN 2
                 pdf.chapter_title(2, "MATERIAL DE PREPARACION")
                 pdf.set_text_color(50, 50, 50)
                 pdf.set_font("Arial", size=11)
                 pdf.cell(0, 6, txt=f"Producto: {nombre_primario}", ln=True)
                 pdf.cell(0, 6, txt=f"Cantidad: {cubetas} cubeta(s) de 19L (Rend. 4m2/L)", ln=True)
                 
-                # --- SOLUCIÓN AL DESCUADRE: IMPORTE PRIMARIO ---
                 pdf.set_font("Arial", 'B', 11)
-                txt_importe_p = f"Importe Sección Primario: ${total_primario:,.2f} MXN"
+                txt_importe_p = f"Importe Seccion Primario: ${total_primario:,.2f} MXN"
                 pdf.cell(0, 6, txt=txt_importe_p.rjust(60), ln=True, align='R')
                 pdf.ln(8)
 
-                # --- TABLA DE TOTALES (SOLUCIÓN DEFINITIVA DESCUADRE) ---
-                # Usamos una fuente monoespaciada (Courier) para que la tabla invisble se cuadre perfecto.
+                # TOTALES CUADRADOS
                 pdf.set_font("Courier", size=12)
-                pdf.set_fill_color(240, 240, 240) # Fondo gris sutil para la tabla
-
-                # Anchos de columna fijos (120mm espacio en blanco, 70mm tabla)
+                pdf.set_fill_color(240, 240, 240)
                 col1 = 120
                 col2 = 70
                 
-                # Fila Subtotal
                 pdf.cell(col1, 8, txt="")
                 pdf.cell(col2, 8, txt=f"SUBTOTAL: ${subtotal:,.2f}".rjust(20), ln=True, align='R', fill=True)
                 
-                # Fila IVA
                 pdf.cell(col1, 8, txt="")
                 pdf.cell(col2, 8, txt=f"I.V.A. (16%): ${iva:,.2f}".rjust(20), ln=True, align='R', fill=True)
                 
-                # Fila Total (Más grande y en naranja)
                 pdf.set_font("Courier", 'B', 14)
                 pdf.set_text_color(255, 102, 0)
                 pdf.cell(col1, 10, txt="")
                 pdf.cell(col2, 10, txt=f"TOTAL: ${gran_total:,.2f}".rjust(20), ln=True, align='R', fill=True)
                 pdf.ln(10)
 
-                # Términos Legales
+                # TÉRMINOS
                 pdf.set_fill_color(255, 102, 0)
                 pdf.set_text_color(255, 255, 255)
                 pdf.set_font("Arial", 'B', 10)
@@ -246,14 +239,17 @@ if submit:
                 pdf.multi_cell(0, 5, txt=terminos)
                 pdf.ln(5)
 
-                # Datos Bancarios con Título Naranja
+                # DATOS BANCARIOS E IMÁGENES CORREGIDAS
                 pdf.set_fill_color(240, 240, 240)
                 pdf.set_text_color(255, 102, 0)
                 pdf.set_font("Arial", 'B', 10)
                 pdf.cell(0, 6, txt="  DATOS PARA DEPOSITO / TRANSFERENCIA", ln=True, fill=True)
                 pdf.ln(2)
                 
-                # --- SOLUCIÓN DESCUADRE BANCO: USAR COURIER PARA LOS DATOS ---
+                # Guardar altura para alinear texto e imagen
+                y_pos_banco = pdf.get_y()
+                
+                # Texto Banco a la Izquierda
                 pdf.set_font("Courier", size=9)
                 pdf.set_text_color(50, 50, 50)
                 banco_txt = (
@@ -262,31 +258,28 @@ if submit:
                     "CLABE: 012905001345083942\n"
                     "RFC: IVE840928BS5"
                 )
-                pdf.multi_cell(0, 5, txt=banco_txt)
-                pdf.ln(5)
-
-                # Imagen del Banco (Centrada)
+                pdf.multi_cell(90, 5, txt=banco_txt)
+                
+                # Imagen Banco a la Derecha (Más pequeña)
                 try:
                     if os.path.exists("banco.png") or os.path.exists("banco.jpg"):
                         ruta_banco = "banco.png" if os.path.exists("banco.png") else "banco.jpg"
-                        y_banco = pdf.get_y()
-                        # Centrar imagen bancaria (centramos el BBVA si está presente)
-                        pdf.image(ruta_banco, x=75, y=y_banco, w=60)
-                        pdf.ln(30) # Espacio para la imagen
+                        pdf.image(ruta_banco, x=130, y=y_pos_banco, w=35)
                 except:
                     pass
 
-                # Marcas Finales (Ajustadas para salir centradas y separadas)
+                # Asegurar espacio antes de marcas
+                pdf.set_y(y_pos_banco + 25)
+
+                # Marcas Finales (Centradas y más chicas)
                 try:
                     if os.path.exists("logos_marcas.png") or os.path.exists("logos_marcas.jpg"):
                         ruta_marcas = "logos_marcas.png" if os.path.exists("logos_marcas.png") else "logos_marcas.jpg"
                         y_marcas = pdf.get_y()
-                        # Centrar la franja de logos de marcas (franja más ancha)
-                        pdf.image(ruta_marcas, x=30, y=y_marcas, w=150)
+                        pdf.image(ruta_marcas, x=40, y=y_marcas, w=130)
                 except:
                     pass
 
-                # Preparar PDF para descarga directa
+                # Botón Descarga
                 archivo_pdf = pdf.output(dest='S').encode('latin-1')
-                # Botón de descarga naranja (por CSS al principio)
                 st.download_button(label="📥 Descargar PDF Formal", data=archivo_pdf, file_name=f"Cotizacion_IMAC_{cliente}.pdf", mime="application/pdf")
