@@ -185,7 +185,7 @@ if submit:
                 pdf.cell(0, 6, txt=texto_cantidad_rollos, ln=True)
                 
                 pdf.set_font("Courier", size=11)
-                txt_precio_u = f"Precio unitario (C/Flete): ${precio_con_flete:,.2f} MXN"
+                txt_precio_u = f"Precio unitario: ${precio_con_flete:,.2f} MXN"
                 pdf.cell(0, 6, txt=txt_precio_u.rjust(60), ln=True, align='R')
                 
                 pdf.set_font("Arial", 'B', 11)
