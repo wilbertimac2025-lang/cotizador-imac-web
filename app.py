@@ -5,7 +5,9 @@ import math
 from fpdf import FPDF
 import datetime
 import json
-import os
+import smtplib
+from email.message import EmailMessage
+import urllib.parse
 
 # --- CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(page_title="Cotizador Corporativo IMAC", page_icon="🍊", layout="centered")
@@ -32,12 +34,45 @@ def conectar_sheets():
         scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
         creds = Credentials.from_service_account_info(credenciales_dic, scopes=scopes)
         cliente = gspread.authorize(creds)
-        # ⚠️ AQUÍ DEBE IR TU ID REAL DE GOOGLE SHEETS (EJEMPLO: "1AbC...XYZ")
+        # ⚠️ AQUÍ PON EL ID DE TU EXCEL DE VENTAS
         sheet = cliente.open_by_key("1-ns2kgub6g4Mg0gQOr-X1ngodUFMWyrbhf9TEUv1T6c").sheet1
         return sheet
     except Exception as e:
-        st.error("Error conectando a la base de datos. Verifica los secretos.")
+        st.error(f"Error de conexión: {e}")
         return None
+
+# --- FUNCIÓN PARA ENVIAR CORREO (MICROSOFT 365) ---
+def enviar_correo(destinatario, archivo_pdf, nombre_cliente):
+    try:
+        remitente = st.secrets["CORREO_BOT"]
+        password = st.secrets["PASS_BOT"]
+
+        msg = EmailMessage()
+        msg['Subject'] = f'Cotización Formal de Materiales - Grupo IMAC'
+        msg['From'] = remitente
+        msg['To'] = destinatario
+        
+        cuerpo_mensaje = f"""
+        Estimado(a) {nombre_cliente},
+        
+        Adjunto a este correo encontrará la cotización formal de sus materiales impermeabilizantes Master Lasser solicitada a Grupo IMAC.
+        
+        Quedamos a su entera disposición para cualquier duda o aclaración.
+        
+        Atentamente,
+        El equipo de Grupo IMAC.
+        """
+        msg.set_content(cuerpo_mensaje)
+        msg.add_attachment(archivo_pdf, maintype='application', subtype='pdf', filename=f"Cotizacion_IMAC_{nombre_cliente}.pdf")
+        
+        with smtplib.SMTP('smtp.office365.com', 587) as smtp:
+            smtp.starttls()
+            smtp.login(remitente, password)
+            smtp.send_message(msg)
+        return True
+    except Exception as e:
+        st.error(f"No se pudo enviar el correo. Error técnico: {e}")
+        return False
 
 # --- CATÁLOGO COMPLETO ---
 catalogo_rollos = {
@@ -61,22 +96,32 @@ st.markdown("""
     div.stButton > button:first-child {
         background-color: #FF6600; color: white; height: 3em; width: 100%; border-radius: 10px; font-size: 20px; font-weight: bold;
     }
+    .whatsapp-btn {
+        background-color: #25D366; color: white; padding: 12px; text-align: center; border-radius: 10px; 
+        font-weight: bold; font-size: 18px; margin-bottom: 15px; text-decoration: none; display: block;
+    }
+    .whatsapp-btn:hover {
+        background-color: #1DA851; color: white; text-decoration: none;
+    }
     </style>
     """, unsafe_allow_html=True)
 
 # --- INTERFAZ WEB ---
 st.title("🍊 Cotizador Grupo IMAC")
-st.subheader("Sistema Móvil - Plataforma Web")
+st.subheader("Sistema de Ventas - Master Lasser")
 
 with st.form("cotizador_form"):
     st.write("### Datos del Cliente")
     vendedor = st.text_input("Tu Nombre (Asesor)")
     cliente = st.text_input("Nombre del Cliente / Proyecto")
+    
     col1, col2 = st.columns(2)
     with col1:
-        telefono = st.text_input("Teléfono")
+        telefono = st.text_input("Teléfono (10 dígitos)")
     with col2:
         ciudad = st.text_input("Ciudad / Ubicación")
+        
+    correo_destino = st.text_input("Correo electrónico del cliente (Opcional)")
 
     st.write("---")
     st.write("### Especificaciones de Material")
@@ -92,194 +137,90 @@ with st.form("cotizador_form"):
 
     submit = st.form_submit_button("GENERAR COTIZACIÓN")
 
-# --- LÓGICA DE GENERACIÓN ---
 if submit:
     if cantidad <= 0 or not cliente or not vendedor:
-        st.warning("⚠️ Por favor llena los datos del vendedor, cliente y una cantidad válida.")
+        st.warning("⚠️ Completa los datos para generar el presupuesto.")
     else:
-        with st.spinner("Generando PDF profesional y guardando en la nube..."):
-            # Cálculos
+        with st.spinner("Procesando cotización..."):
             if modo == "Por m²":
-                m2 = cantidad
-                rollos = math.ceil((m2 * 1.16) / 10)
-                etiqueta_area = f"Area total a cubrir: {m2} m2"
+                rollos = math.ceil((cantidad * 1.16) / 10)
+                etiqueta_area = f"Area total a cubrir: {cantidad} m2"
             else:
                 rollos = math.ceil(cantidad)
-                m2 = round((rollos * 10) / 1.16, 2)
-                etiqueta_area = f"Area aprox. a cubrir: {m2} m2"
+                m2_aprox = round((rollos * 10) / 1.16, 2)
+                etiqueta_area = f"Area aprox. a cubrir: {m2_aprox} m2"
 
             producto_elegido = catalogo_rollos[producto_nombre]
-            precio_base = producto_elegido["precio"]
-            flete_unitario = flete / rollos if rollos > 0 else 0
-            precio_con_flete = precio_base + flete_unitario
-            total_rollos = rollos * precio_con_flete
+            flete_u = flete / rollos if rollos > 0 else 0
+            precio_final_u = producto_elegido["precio"] + flete_u
+            total_rollos = rollos * precio_final_u
 
-            cubetas = math.ceil((m2 / 4) / 19)
-            precio_primario = 725.0 if "Agua" in primario else 1218.0
-            nombre_primario = 'MASTER PRIM "A" CUB. 19 LTS.' if "Agua" in primario else 'MASTER PRIM "S" CUB. 19 LTS.'
-            total_primario = cubetas * precio_primario
-
-            subtotal = total_rollos + total_primario
+            subtotal = total_rollos 
             iva = subtotal * 0.16
             gran_total = subtotal + iva
 
-            # 1. Guardar en Google Sheets
+            # 1. Guardar en Excel
             hoja = conectar_sheets()
             if hoja:
                 fecha_hoy = datetime.datetime.now().strftime("%d/%m/%Y %H:%M")
-                fila = [fecha_hoy, vendedor, cliente, telefono, ciudad, round(gran_total, 2), "Generado en Web"]
-                hoja.append_row(fila)
-                st.success(f"✅ ¡Venta registrada exitosamente! Total: ${gran_total:,.2f} MXN")
-
+                hoja.append_row([fecha_hoy, vendedor, cliente, ciudad, round(gran_total, 2)])
+                
                 # 2. Generar PDF
                 pdf = PDF()
                 pdf.add_page()
-                
-                # Logo grande
-                try:
-                    if os.path.exists("logo.jpg"):
-                        pdf.image("logo.jpg", x=10, y=8, w=60)
-                    elif os.path.exists("logo.png"):
-                        pdf.image("logo.png", x=10, y=8, w=60)
-                except:
-                    pass
-
-                # Encabezado
                 pdf.set_font("Arial", 'B', 16)
                 pdf.set_text_color(255, 102, 0)
-                pdf.cell(0, 8, txt="GRUPO IMAC", ln=True, align='R')
+                pdf.cell(0, 10, "GRUPO IMAC", ln=True, align='R')
                 pdf.set_font("Arial", size=10)
                 pdf.set_text_color(100, 100, 100)
-                pdf.cell(0, 5, txt="Soluciones en Impermeabilizacion", ln=True, align='R')
-                pdf.cell(0, 5, txt="Tel: (229) 935-06-94 Ext. 23", ln=True, align='R')
-                pdf.cell(0, 5, txt="masterventas@grupo-imac.com", ln=True, align='R')
+                pdf.cell(0, 5, "Cotizacion Formal de Materiales", ln=True, align='R')
                 pdf.ln(10)
 
-                # Título Naranja
                 pdf.set_fill_color(255, 102, 0)
                 pdf.set_text_color(255, 255, 255)
-                pdf.set_font("Arial", 'B', 14)
-                pdf.cell(0, 10, txt="  COTIZACION FORMAL", ln=True, fill=True)
+                pdf.set_font("Arial", 'B', 12)
+                pdf.cell(0, 10, f"  CLIENTE: {cliente}", ln=True, fill=True)
                 pdf.ln(5)
 
-                # Datos del Cliente
                 pdf.set_text_color(0, 0, 0)
-                fecha_pdf = datetime.datetime.now().strftime("%d/%m/%Y")
-                pdf.set_font("Arial", 'B', 11)
-                pdf.cell(100, 6, txt=f"Cliente / Proyecto: {cliente}")
                 pdf.set_font("Arial", size=11)
-                pdf.cell(90, 6, txt=f"Fecha de emision: {fecha_pdf}", ln=True, align='R')
-                pdf.set_font("Arial", size=10)
-                pdf.cell(100, 6, txt=f"Ubicacion: {ciudad}")
-                pdf.set_font("Arial", 'B', 11)
-                pdf.cell(90, 6, txt=etiqueta_area, ln=True, align='R')
+                pdf.cell(0, 8, f"Producto: {producto_nombre}", ln=True)
+                pdf.cell(0, 8, f"Cantidad: {rollos} rollos", ln=True)
+                pdf.cell(0, 8, f"Ubicacion: {ciudad}", ln=True)
+                pdf.cell(0, 8, etiqueta_area, ln=True)
+                
                 pdf.ln(5)
-
-                # SECCIÓN 1
-                pdf.chapter_title(1, "SISTEMA IMPERMEABILIZANTE")
-                pdf.set_text_color(50, 50, 50)
-                pdf.set_font("Arial", size=11)
-                pdf.cell(0, 6, txt=f"Clave: {producto_elegido['clave']}", ln=True)
-                pdf.cell(0, 6, txt=f"Producto: {producto_nombre}", ln=True)
-                texto_cantidad_rollos = f"Cantidad: {rollos} rollos (Incluye mermas)" if modo == "Por m²" else f"Cantidad: {rollos} rollos (Piezas directas)"
-                pdf.cell(0, 6, txt=texto_cantidad_rollos, ln=True)
-                
-                pdf.set_font("Courier", size=11)
-                txt_precio_u = f"Precio unitario: ${precio_con_flete:,.2f} MXN"
-                pdf.cell(0, 6, txt=txt_precio_u.rjust(60), ln=True, align='R')
-                
-                pdf.set_font("Arial", 'B', 11)
-                txt_importe_r = f"Importe Seccion Rollos: ${total_rollos:,.2f} MXN"
-                pdf.cell(0, 6, txt=txt_importe_r.rjust(60), ln=True, align='R')
-                pdf.ln(5)
-
-                # SECCIÓN 2
-                pdf.chapter_title(2, "MATERIAL DE PREPARACION")
-                pdf.set_text_color(50, 50, 50)
-                pdf.set_font("Arial", size=11)
-                pdf.cell(0, 6, txt=f"Producto: {nombre_primario}", ln=True)
-                pdf.cell(0, 6, txt=f"Cantidad: {cubetas} cubeta(s) de 19L (Rend. 4m2/L)", ln=True)
-                
-                pdf.set_font("Arial", 'B', 11)
-                txt_importe_p = f"Importe Seccion Primario: ${total_primario:,.2f} MXN"
-                pdf.cell(0, 6, txt=txt_importe_p.rjust(60), ln=True, align='R')
-                pdf.ln(8)
-
-                # TOTALES CUADRADOS
-                pdf.set_font("Courier", size=12)
-                pdf.set_fill_color(240, 240, 240)
-                col1 = 120
-                col2 = 70
-                
-                pdf.cell(col1, 8, txt="")
-                pdf.cell(col2, 8, txt=f"SUBTOTAL: ${subtotal:,.2f}".rjust(20), ln=True, align='R', fill=True)
-                
-                pdf.cell(col1, 8, txt="")
-                pdf.cell(col2, 8, txt=f"I.V.A. (16%): ${iva:,.2f}".rjust(20), ln=True, align='R', fill=True)
-                
+                pdf.set_font("Courier", 'B', 12)
+                pdf.cell(0, 10, f"Precio unitario: ${precio_final_u:,.2f} MXN", ln=True, align='R')
                 pdf.set_font("Courier", 'B', 14)
                 pdf.set_text_color(255, 102, 0)
-                pdf.cell(col1, 10, txt="")
-                pdf.cell(col2, 10, txt=f"TOTAL: ${gran_total:,.2f}".rjust(20), ln=True, align='R', fill=True)
-                pdf.ln(10)
+                pdf.cell(0, 10, f"TOTAL A PAGAR: ${gran_total:,.2f} MXN", ln=True, align='R', fill=False)
 
-                # TÉRMINOS
-                pdf.set_fill_color(255, 102, 0)
-                pdf.set_text_color(255, 255, 255)
-                pdf.set_font("Arial", 'B', 10)
-                pdf.cell(0, 6, txt="  TERMINOS Y CONDICIONES COMERCIALES", ln=True, fill=True)
-                pdf.set_text_color(50, 50, 50)
-                pdf.set_font("Arial", size=9)
-                terminos = (
-                    "1. Precios sujetos a cambio sin previo aviso.\n"
-                    "2. Vigencia de la cotizacion: 15 dias habiles.\n"
-                    "3. Tiempo de entrega: 2 a 3 dias habiles una vez confirmado el anticipo.\n"
-                    "4. El material se entrega a pie de obra en planta baja."
-                )
-                pdf.multi_cell(0, 5, txt=terminos)
-                pdf.ln(5)
-
-                # DATOS BANCARIOS E IMÁGENES CORREGIDAS
-                pdf.set_fill_color(240, 240, 240)
-                pdf.set_text_color(255, 102, 0)
-                pdf.set_font("Arial", 'B', 10)
-                pdf.cell(0, 6, txt="  DATOS PARA DEPOSITO / TRANSFERENCIA", ln=True, fill=True)
-                pdf.ln(2)
+                pdf_output = pdf.output(dest='S').encode('latin-1')
                 
-                # Guardar altura para alinear texto e imagen
-                y_pos_banco = pdf.get_y()
+                st.success("✅ Cotización registrada exitosamente.")
                 
-                # Texto Banco a la Izquierda
-                pdf.set_font("Courier", size=9)
-                pdf.set_text_color(50, 50, 50)
-                banco_txt = (
-                    "Banco: BBVA\n"
-                    "Cuenta: 0134508394\n"
-                    "CLABE: 012905001345083942\n"
-                    "RFC: IVE840928BS5"
-                )
-                pdf.multi_cell(90, 5, txt=banco_txt)
+                # 3. Botón de Descarga Manual
+                st.download_button(label="📥 Descargar PDF de Cotización", data=pdf_output, file_name=f"Cotizacion_IMAC_{cliente}.pdf")
                 
-                # Imagen Banco a la Derecha (Más pequeña)
-                try:
-                    if os.path.exists("banco.png") or os.path.exists("banco.jpg"):
-                        ruta_banco = "banco.png" if os.path.exists("banco.png") else "banco.jpg"
-                        pdf.image(ruta_banco, x=130, y=y_pos_banco, w=35)
-                except:
-                    pass
-
-                # Asegurar espacio antes de marcas
-                pdf.set_y(y_pos_banco + 25)
-
-                # Marcas Finales (Centradas y más chicas)
-                try:
-                    if os.path.exists("logos_marcas.png") or os.path.exists("logos_marcas.jpg"):
-                        ruta_marcas = "logos_marcas.png" if os.path.exists("logos_marcas.png") else "logos_marcas.jpg"
-                        y_marcas = pdf.get_y()
-                        pdf.image(ruta_marcas, x=40, y=y_marcas, w=130)
-                except:
-                    pass
-
-                # Botón Descarga
-                archivo_pdf = pdf.output(dest='S').encode('latin-1')
-                st.download_button(label="📥 Descargar PDF Formal", data=archivo_pdf, file_name=f"Cotizacion_IMAC_{cliente}.pdf", mime="application/pdf")
+                # 4. Enviar Correo (Si hay)
+                if correo_destino:
+                    with st.spinner("Enviando correo..."):
+                        if enviar_correo(correo_destino, pdf_output, cliente):
+                            st.success(f"📧 ¡Enviado a {correo_destino}!")
+                
+                # 5. Generar enlace de WhatsApp (Si hay teléfono)
+                if telefono:
+                    numero_limpio = telefono.replace(" ", "").replace("-", "")
+                    if not numero_limpio.startswith("+52") and len(numero_limpio) == 10:
+                        numero_limpio = "+52" + numero_limpio
+                    
+                    mensaje = f"Hola {cliente}, te comparto tu cotización formal por los materiales de impermeabilización Master Lasser solicitados a Grupo IMAC. Quedo a tus órdenes."
+                    mensaje_codificado = urllib.parse.quote(mensaje)
+                    link_whatsapp = f"https://api.whatsapp.com/send?phone={numero_limpio}&text={mensaje_codificado}"
+                    
+                    st.markdown(f"""
+                        <a href="{link_whatsapp}" target="_blank" class="whatsapp-btn">
+                            💬 Enviar mensaje por WhatsApp
+                        </a>
+                        """, unsafe_allow_html=True)
